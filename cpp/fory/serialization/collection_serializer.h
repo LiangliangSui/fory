@@ -544,10 +544,17 @@ struct Serializer<
       return Unexpected(
           Error::invalid("Vector byte size exceeds uint32_t range"));
     }
-    ctx.write_varuint32(static_cast<uint32_t>(total_bytes));
+    // bulk write may write 8 bytes for varint32
+    size_t max_size = 8 + total_bytes;
+    ctx.buffer().Grow(static_cast<uint32_t>(max_size));
+    uint32_t writer_index = ctx.buffer().writer_index();
+    uint32_t bytes_written = ctx.buffer().PutVarUint32(
+          writer_index, static_cast<uint32_t>(total_bytes));
     if (total_bytes > 0) {
-      ctx.write_bytes(vec.data(), static_cast<uint32_t>(total_bytes));
+      ctx.buffer().UnsafePut(writer_index + bytes_written,
+              vec.data(), static_cast<uint32_t>(total_bytes));
     }
+    ctx.buffer().WriterIndex(bytes_written + static_cast<uint32_t>(total_bytes));
     return Result<void, Error>();
   }
 
@@ -835,10 +842,15 @@ template <typename Alloc> struct Serializer<std::vector<bool, Alloc>> {
 
   static inline Result<void, Error>
   write_data(const std::vector<bool, Alloc> &vec, WriteContext &ctx) {
-    ctx.write_varuint32(static_cast<uint32_t>(vec.size()));
-    for (bool value : vec) {
-      ctx.write_uint8(value ? 1 : 0);
+    // bulk write may write 8 bytes for varint32
+    constexpr size_t max_size = 8 + vec.size();
+    ctx.buffer().Grow(static_cast<uint32_t>(max_size));
+    uint32_t writer_index = ctx.buffer().writer_index();
+    uint32_t bytes_written = ctx.buffer().PutVarUint32(writer_index, static_cast<uint32_t>(vec.size()));
+    for (size_t i = 0; i < vec.size(); ++i) {
+      ctx.buffer().UnsafePutByte(writer_index + bytes_written + i, vec[i] ? 1 : 0);
     }
+    ctx.buffer().WriterIndex(writer_index + bytes_written + vec.size());
     return Result<void, Error>();
   }
 
