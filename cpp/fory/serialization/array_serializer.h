@@ -71,13 +71,18 @@ struct Serializer<
 
   static Result<void, Error> write_data(const std::array<T, N> &arr,
                                         WriteContext &ctx) {
+    // bulk write may write 8 bytes for varint32
+    constexpr size_t max_size = 8 + N * sizeof(T);
+    ctx.buffer().Grow(static_cast<uint32_t>(max_size));
+    uint32_t write_index = ctx.buffer().write_index();
     // Write array length
-    ctx.write_varuint32(static_cast<uint32_t>(N));
+    uint32_t bytes_written = ctx.buffer().PutVarUint32(write_index, static_cast<uint32_t>(N));
 
     // Write raw binary data
     if constexpr (N > 0) {
-      ctx.write_bytes(arr.data(), N * sizeof(T));
+      ctx.buffer().UnsafePut(write_index + bytes_written, arr.data(), N * sizeof(T));
     }
+    ctx.buffer().WriterIndex(bytes_written + N * sizeof(T));
     return Result<void, Error>();
   }
 
@@ -149,14 +154,19 @@ template <size_t N> struct Serializer<std::array<bool, N>> {
 
   static Result<void, Error> write_data(const std::array<bool, N> &arr,
                                         WriteContext &ctx) {
+    // bulk write may write 8 bytes for varint32
+    constexpr size_t max_size = 8 + N;
+    ctx.buffer().Grow(static_cast<uint32_t>(max_size));
+    uint32_t writer_index = ctx.buffer().writer_index();
     // Write array length
-    ctx.write_varuint32(static_cast<uint32_t>(N));
+    uint32_t bytes_written = ctx.buffer().PutVarUint32(writer_index, static_cast<uint32_t>(N));
 
     // Write each boolean as a byte (per spec, bool is serialized as int16,
     // but for arrays we use packed bytes for efficiency)
     for (size_t i = 0; i < N; ++i) {
-      ctx.write_uint8(arr[i] ? 1 : 0);
+      ctx.buffer().UnsafePutByte(writer_index + bytes_written + i, arr[i] ? 1 : 0);
     }
+    ctx.buffer().WriterIndex(bytes_written + N);
     return Result<void, Error>();
   }
 
